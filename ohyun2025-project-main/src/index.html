@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>게임 공략 게시판</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>게임 공략 게시판</h1>
+        <form id="postForm">
+            <input type="text" id="title" placeholder="제목" required />
+            <textarea id="content" placeholder="공략 내용을 입력하세요" required></textarea>
+            <button type="submit">공략글 등록</button>
+        </form>
+        <div id="posts"></div>
+    </div>
+    <script src="main.js"></script>
+</body>
+</html>
