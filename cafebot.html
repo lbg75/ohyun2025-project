@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<!--
+ * @license
+ * Copyright 2023 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg" />
+    <title>Generative AI - Chat</title>
+    <link rel="stylesheet" href="cafebot.css">
+  </head>
+  <body>
+    <header>원범 주식 시장</header>
+    <div class="container">
+      <div id="chat-history"></div>
+      <div id="chart-container" style="width:400px; float:right; margin-left:20px;">
+        <canvas id="stockChart"></canvas>
+      </div>
+    </div>
+    <div class="form-container">
+      <div style="margin-bottom:10px;">
+        <label for="apikey">API KEY: </label>
+        <input id="apikey" type="text" style="width:300px;" placeholder="Google API Key 입력" />
+        <button type="button" id="save-apikey">저장</button>
+      </div>
+      <form id="form">
+        <input id="prompt" />
+        <button type="submit">Send</button>
+      </form>
+      <template id="thumb-template">
+        <img class="thumb" />
+      </template>
+    </div>
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/generative-ai": "https://esm.run/@google/generative-ai",
+          "marked": "https://esm.run/marked"
+        }
+      }
+    </script>
+    <script>
+      // 페이지 새로고침 시 API KEY 초기화
+localStorage.removeItem('MY_API_KEY');
+//************ 여기에 API키를 입력합니다 (코드에서 직접 사용하지 마세요. 아래 입력란을 사용하세요) ************//
+// let MY_API_KEY = "" (사용자 입력란에서 관리)
+let MY_API_KEY = '';
+const apikeyInput = document.getElementById('apikey');
+const saveBtn = document.getElementById('save-apikey');
+if (apikeyInput) {
+  apikeyInput.value = '';
+  apikeyInput.addEventListener('input', e => {
+    MY_API_KEY = e.target.value;
+  });
+  saveBtn.addEventListener('click', () => {
+    localStorage.setItem('MY_API_KEY', apikeyInput.value);
+    alert('API KEY가 저장되었습니다!');
+  });
+}
+
+//************ 여기에 내가 원하는 설정을 입력합니다 ************//
+//************ 여기에 내가 원하는 설정을 입력합니다 ************//
+//************ 여기에 내가 원하는 설정을 입력합니다 ************//
+// 주식 가격 객체 생성
+window.stockPrices = {
+  '원범전자': 20000,
+  '원범뱅크': 20000,
+  '원범항공': 20000,
+  '원범컬쳐': 20000,
+  '원범증권': 20000
+};
+
+// 주식 가격을 1분마다 5~50% 랜덤하게 증감
+function updateStockPrices() {
+  Object.keys(window.stockPrices).forEach(stock => {
+    const up = Math.random() < 0.5 ? 1 : -1;
+    const percent = Math.random() * 0.1 + 0.1; // 10%~20%
+    let price = window.stockPrices[stock];
+    let change = Math.round(price * percent) * up;
+    price += change;
+    if (price < 1000) price = 1000; // 최소 가격 제한
+    window.stockPrices[stock] = price;
+  });
+}
+setInterval(updateStockPrices, 60000); // 1분마다 실행
+
+// 프롬프트 텍스트를 동적으로 생성
+// 주식 종목은
+// 원범전자: 20000원
+// 원범뱅크: 20000원
+// 원범항공: 20000원
+// 원범컬쳐: 20000원
+// 원범증권: 20000원
+// 이다. 주문(매수/매도)을 받아서 계산을 해주는 역할이다.
+// 인사, 주문, 계산, 종목설명만 대답 할 수 있다.
+// 주문에 수량이 있는 경우에는 수량을 곱해서 계산한다.
+// 종목에 없는 종목은 거래하지 않는다.
+// 종목 설명이나 계산을 할때는 마크다운 형식으로 보여줘.
+// 다른 대화는 할 수 없다.
+// 다른 질문을 추가 할 수 없다.
+// 응답은 JSON형태로 돌려준다.
+// 구분은 type과 text로 한다.
+// type은 주문이 아닌경우 chat, 주문인경우 order로 한다.
+// 주문인경우에는 stock과 price, count, orderType(매수/매도)를 추가한다.
+function getPromptText() {
+  const stocks = Object.entries(window.stockPrices)
+    .map(([name, price]) => `*   ${name}: ${price}원`)
+    .join('\n');
+  return `**주식 종목**\n\n${stocks}\n이다. 주문(매수/매도)을 받아서 계산을 해주는 역할이다.\n인사, 주문, 계산, 종목설명만 대답 할 수 있다.\n주문에 수량이 있는 경우에는 수량을 곱해서 계산한다.\n종목에 없는 종목은 거래하지 않는다.\n종목 설명이나 계산을 할때는 마크다운 형식으로 보여줘.\n다른 대화는 할 수 없다.\n다른 질문을 추가 할 수 없다.\n응답은 JSON형태로 돌려준다.\n구분은 type과 text로 한다.\ntype은 주문이 아닌경우 chat, 주문인경우 order로 한다.\n주문인경우에는 stock과 price, count, orderType(매수/매도)를 추가한다.\n`;
+}
+const MY_PROMPT_TEXT = getPromptText();
+    </script>
+    <script type="module">
+      import { GoogleGenerativeAI, HarmBlockThreshold } from "@google/generative-ai";
+import { marked } from "marked";
+async function updateUI(resultEl, getResult, streaming) {
+  resultEl.className = "loading";
+  let text = "";
+  try {
+    const result = await getResult();
+
+    if (streaming) {
+      resultEl.innerText = "";
+      for await (const chunk of result.stream) {
+        // Get first candidate's current text chunk
+        const chunkText = chunk.text();
+        text += chunkText;
+        resultEl.innerHTML = marked.parse(text);
+        scrollToDocumentBottom();
+      }
+    } else {
+      const response = await result.response;
+      text = response.text();
+    }
+
+    resultEl.className = ""; // Remove .loading class
+  } catch (err) {
+    text += "\n\n> " + err;
+    resultEl.className = "error";
+  }
+  resultEl.innerHTML = marked.parse(text);
+  scrollToDocumentBottom();
+  // 매수/매도 기록 추적
+  try {
+    const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || '{}');
+    if (json.type === 'order' && json.stock && json.count && json.orderType) {
+      if (userStocks.hasOwnProperty(json.stock)) {
+        if (json.orderType === '매수') {
+          userStocks[json.stock] += Number(json.count);
+        } else if (json.orderType === '매도') {
+          userStocks[json.stock] -= Number(json.count);
+          if (userStocks[json.stock] < 0) userStocks[json.stock] = 0;
+        }
+        updateUserStockTable();
+      }
+    }
+  } catch(e) {}
+}
+
+function scrollToDocumentBottom() {
+  const scrollingElement = document.scrollingElement || document.body;
+  scrollingElement.scrollTop = scrollingElement.scrollHeight;
+}
+
+async function getGenerativeModel(params) {
+  // const API_KEY = MY_API_KEY;
+  const safetyConfig = {
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  };
+  const genAI = new GoogleGenerativeAI(MY_API_KEY);
+  return genAI.getGenerativeModel(params, safetyConfig);
+}
+
+const promptInput = document.querySelector("#prompt");
+const historyElement = document.querySelector("#chat-history");
+let chat;
+
+document.querySelector("#form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  // 매번 최신 가격으로 프롬프트 생성
+  const dynamicPrompt = getPromptText();
+
+  if (!chat) {
+    const model = await getGenerativeModel({ model: "gemini-2.0-flash" });
+    chat = model.startChat({
+      history: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: dynamicPrompt,
+            },
+          ],
+        },
+        {
+          role: "model",
+          parts: [{ text: "네" }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: 500,
+      },
+    });
+  } else {
+    // 기존 대화가 있다면, 프롬프트를 대화 시작 메시지로 추가
+    await chat.sendMessage(dynamicPrompt);
+  }
+
+  const userMessage = promptInput.value;
+  promptInput.value = "";
+
+  // Create UI for the new user / assistant messages pair
+  historyElement.innerHTML += `<div class="history-item user-role">
+      <div class="name">User</div>
+      <blockquote>${userMessage}</blockquote>
+    </div>
+    <div class="history-item model-role">
+      <div class="name">Model</div>
+      <blockquote></blockquote>
+    </div>`;
+
+  scrollToDocumentBottom();
+  const resultEls = document.querySelectorAll(".model-role > blockquote");
+  await updateUI(
+    resultEls[resultEls.length - 1],
+    () => chat.sendMessageStream(userMessage),
+    true
+  );
+});
+
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+      // 가격 기록용 배열
+const stockHistory = {
+  '원범전자': [20000],
+  '원범뱅크': [20000],
+  '원범항공': [20000],
+  '원범컬쳐': [20000],
+  '원범증권': [20000]
+};
+const MAX_HISTORY = 20;
+
+// Chart.js 그래프 초기화
+const ctx = document.getElementById('stockChart').getContext('2d');
+const stockChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: Array(MAX_HISTORY).fill(''),
+    datasets: Object.keys(stockHistory).map((name, idx) => ({
+      label: name,
+      data: stockHistory[name],
+      borderColor: ['#e74c3c','#2980b9','#27ae60','#f39c12','#8e44ad'][idx],
+      fill: false,
+      tension: 0.2
+    }))
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: { y: { beginAtZero: false } }
+  }
+});
+
+function updateChartHistory() {
+  Object.keys(window.stockPrices).forEach(name => {
+    stockHistory[name].push(window.stockPrices[name]);
+    if (stockHistory[name].length > MAX_HISTORY) stockHistory[name].shift();
+  });
+  stockChart.data.datasets.forEach(ds => {
+    ds.data = stockHistory[ds.label];
+  });
+  stockChart.update();
+}
+setInterval(updateChartHistory, 60000); // 1분마다 그래프 갱신
+// 최초 1회 실행
+updateChartHistory();
+
+// 매수/매도 기록 객체
+const userStocks = {
+  '원범전자': 0,
+  '원범뱅크': 0,
+  '원범항공': 0,
+  '원범컬쳐': 0,
+  '원범증권': 0
+};
+
+// 보유 주식 테이블 UI 추가
+const stockTableHtml = `
+  <div id="user-stock-container" style="margin-top:20px;">
+    <h3>내 보유 주식</h3>
+    <table id="user-stock-table" border="1" style="width:100%;text-align:center;">
+      <thead><tr><th>종목</th><th>보유수량</th></tr></thead>
+      <tbody>
+        <tr><td>원범전자</td><td id="stock-원범전자">0</td></tr>
+        <tr><td>원범뱅크</td><td id="stock-원범뱅크">0</td></tr>
+        <tr><td>원범항공</td><td id="stock-원범항공">0</td></tr>
+        <tr><td>원범컬쳐</td><td id="stock-원범컬쳐">0</td></tr>
+        <tr><td>원범증권</td><td id="stock-원범증권">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+`;
+document.querySelector('.form-container').insertAdjacentHTML('afterend', stockTableHtml);
+
+function updateUserStockTable() {
+  Object.keys(userStocks).forEach(name => {
+    document.getElementById('stock-' + name).innerText = userStocks[name];
+  });
+}
+    </script>
+  </body>
+</html>
